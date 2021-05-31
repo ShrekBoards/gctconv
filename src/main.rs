@@ -1,4 +1,7 @@
-use std::convert::TryFrom;
+use std::{
+    convert::TryFrom,
+    io::{Seek, SeekFrom},
+};
 use std::{
     env,
     fs::{self, File, Metadata},
@@ -84,6 +87,17 @@ fn to_tex0(args: Vec<String>) {
         }
     }
 
+    let seek_result = gct_file.seek(SeekFrom::Start(0x10));
+    match seek_result {
+        Ok(_) => {}
+        Err(error) => {
+            let error_string = error.to_string();
+            println!("Seek Error: {}\n", error_string);
+            usage();
+            process::exit(exitcode::IOERR);
+        }
+    }
+
     let mut width_bytes = [0; 2];
     let width_result = gct_file.read_exact(&mut width_bytes);
     match width_result {
@@ -115,6 +129,106 @@ fn to_tex0(args: Vec<String>) {
         Err(error) => {
             let error_string = error.to_string();
             println!("Unable to read encoding type: {}\n", error_string);
+            usage();
+            process::exit(exitcode::IOERR);
+        }
+    }
+
+    let seek_result = gct_file.seek(SeekFrom::Start(0x40));
+    match seek_result {
+        Ok(_) => {}
+        Err(error) => {
+            let error_string = error.to_string();
+            println!("Seek Error: {}\n", error_string);
+            usage();
+            process::exit(exitcode::IOERR);
+        }
+    }
+
+    let mut rest_of_file = Vec::new();
+    let read_result = gct_file.read_to_end(&mut rest_of_file);
+    match read_result {
+        Ok(_) => {}
+        Err(error) => {
+            let error_string = error.to_string();
+            println!("Unable to read rest of file: {}\n", error_string);
+            usage();
+            process::exit(exitcode::IOERR);
+        }
+    }
+
+    let tex0_ascii = "TEX0";
+    if !tex0_ascii.is_ascii() {
+        println!("\"{}\" isn't ascii\n", tex0_ascii);
+        usage();
+        process::exit(exitcode::DATAERR);
+    }
+
+    // header starts with "TEX0"
+    let mut header = tex0_ascii.as_bytes().to_owned();
+    // header == ["T", "E", "X", "0"]
+
+    // then the filesize, big endian
+    let fs_bytes = fs_int.to_be_bytes().to_vec();
+    header.extend(fs_bytes);
+    // header == [...[0x04], FS_1, FS_2, FS_3, FS_4]
+
+    // then tex0 version as int, 1 in our case
+    let four_byte_1 = 1_u32.to_be_bytes().to_vec();
+    header.extend(&four_byte_1);
+    // header == [...[0x08], 1_byte_1, 1_byte_2, 1_byte_3, 1_byte_4]
+
+    // then int 0
+    let four_byte_0 = 0_u32.to_be_bytes().to_vec();
+    header.extend(&four_byte_0);
+    // header == [...[0x0C], 0_byte, 0_byte, 0_byte, 0_byte]
+
+    // then 'idk'?? just hex 0x40 as int
+    let idk = 0x40_u32.to_be_bytes().to_vec();
+    header.extend(idk);
+    // header == [...[0x10], 0x40_1, 0x40_2, 0x40_3, 0x40_4]
+
+    // then 0x4 + filesize, as int
+    let fs_plus_4 = fs_int + 0x4;
+    let fs_p4_bytes = fs_plus_4.to_be_bytes().to_vec();
+    header.extend(fs_p4_bytes);
+    // header == [...[0x14], FS_P4_1, FS_P4_2, FS_P4_3, FS_P4_4]
+
+    // then int 0 again
+    header.extend(&four_byte_0);
+    // header == [...[0x18], 0_byte, 0_byte, 0_byte, 0_byte]
+
+    // width as short, height as short, enc as byte
+    header.extend(width_bytes.to_vec());
+    // header == [...[0x1A], width_1, width_2]
+    header.extend(height_bytes.to_vec());
+    // header == [...[0x1C], height_1, height_2]
+
+    // padding for enc byte
+    header.extend([0, 0, 0].to_vec());
+    // header == [...[0x20], 0_byte, 0_byte, 0_byte]
+
+    // encoding byte
+    header.extend(enc_byte.to_vec());
+    // header == [...[0x23], enc_byte]
+
+    // mipmap count + 1 as int; no mipmaps, so just 1
+    header.extend(&four_byte_1);
+    // header == [...[0x24], 1_byte_1, 1_byte_2, 1_byte_3, 1_byte_4]
+
+    let padding = [0_u8; 24].to_vec();
+    header.extend(padding);
+    // header is now padded to 0x40
+
+    let mut tex0_file = header;
+    tex0_file.extend(rest_of_file);
+
+    let write_result = fs::write("test.tex0", tex0_file);
+    match write_result {
+        Ok(_) => {}
+        Err(error) => {
+            let error_string = error.to_string();
+            println!("Unable to write TEX0 file: {}\n", error_string);
             usage();
             process::exit(exitcode::IOERR);
         }
