@@ -288,7 +288,8 @@ fn to_tex0(args: Vec<String>) {
 
     tex0_file.extend(&footer);
 
-    let write_result = fs::write("test.tex0", tex0_file);
+    let tex0_path = format!("output/Textures(NW4R)/{}.tex0", fs_string);
+    let write_result = fs::write(tex0_path, tex0_file);
     match write_result {
         Ok(_) => {}
         Err(error) => {
@@ -305,7 +306,8 @@ fn to_tex0(args: Vec<String>) {
 
     plt0_file.extend(footer);
 
-    let write_result = fs::write("test.plt0", plt0_file);
+    let plt0_path = format!("output/Palettes(NW4R)/{}.plt0", fs_string);
+    let write_result = fs::write(plt0_path, plt0_file);
     match write_result {
         Ok(_) => {}
         Err(error) => {
