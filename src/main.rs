@@ -239,15 +239,29 @@ fn to_tex0(args: Vec<String>) {
     header.extend(padding);
     // header is now padded to 0x40
 
-    if enc_byte[0] == 0x08 {
+    let mut plt0_file = if enc_byte[0] == 0x08 {
         // if CI4, extract palette data
         let palette_data = rest_of_file.split_off(rest_of_file.len() - 0x20);
-    }
+
+        const PLT0_HEADER: [u8; 0x40] = [
+            0x50, 0x4C, 0x54, 0x30, 0x00, 0x00, 0x00, 0x60, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x40, 0x00, 0x00, 0x00, 0x64, 0x00, 0x00, 0x00, 0x02,
+            0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ];
+
+        let mut plt0_file = PLT0_HEADER.to_vec();
+        plt0_file.extend(palette_data);
+        plt0_file
+    } else {
+        Vec::new()
+    };
 
     let mut tex0_file = header;
     tex0_file.extend(rest_of_file);
 
-    let mut tex0_footer = vec![0_u8; 3]; // three 0 bytes
+    let mut footer = vec![0_u8; 3]; // three 0 bytes
     if !fs_string.is_ascii() {
         println!("\"{}\" isn't ascii\n", fs_string);
         usage();
@@ -268,11 +282,11 @@ fn to_tex0(args: Vec<String>) {
         }
     }
 
-    tex0_footer.extend(vec![sl_byte]); // vec.extend_one is unstable, so have to vec![]
-    tex0_footer.extend(stem_bytes);
-    tex0_footer.extend([0; 3].to_vec());
+    footer.extend(vec![sl_byte]); // vec.extend_one is unstable, so have to vec![]
+    footer.extend(stem_bytes);
+    footer.extend([0; 3].to_vec());
 
-    tex0_file.extend(tex0_footer);
+    tex0_file.extend(&footer);
 
     let write_result = fs::write("test.tex0", tex0_file);
     match write_result {
@@ -280,6 +294,23 @@ fn to_tex0(args: Vec<String>) {
         Err(error) => {
             let error_string = error.to_string();
             println!("Unable to write TEX0 file: {}\n", error_string);
+            usage();
+            process::exit(exitcode::IOERR);
+        }
+    }
+
+    if plt0_file.is_empty() {
+        return;
+    }
+
+    plt0_file.extend(footer);
+
+    let write_result = fs::write("test.plt0", plt0_file);
+    match write_result {
+        Ok(_) => {}
+        Err(error) => {
+            let error_string = error.to_string();
+            println!("Unable to write PLT0 file: {}\n", error_string);
             usage();
             process::exit(exitcode::IOERR);
         }
