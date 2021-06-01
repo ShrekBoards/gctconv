@@ -284,7 +284,13 @@ fn to_tex0(args: Vec<String>) {
 
     footer.extend(vec![sl_byte]); // vec.extend_one is unstable, so have to vec![]
     footer.extend(stem_bytes);
-    footer.extend([0; 3].to_vec());
+    let end_pad_len = if footer.len() % 4 == 0 {
+        4
+    } else {
+        footer.len() % 4
+    };
+    // footer name padding is padded up to the next 4th byte
+    footer.extend(vec![0; end_pad_len]);
 
     tex0_file.extend(&footer);
 
@@ -319,7 +325,181 @@ fn to_tex0(args: Vec<String>) {
     }
 }
 
-fn to_gct(args: Vec<String>) {}
+fn to_gct(args: Vec<String>) {
+    const TREY_PAD: [u8; 0x20] = [
+        0x20, 0x74, 0x72, 0x65, 0x79, 0x61, 0x72, 0x63, 0x68, 0x67, 0x63, 0x74, 0x2E, 0x38, 0x62,
+        0x69, 0x20, 0x76, 0x32, 0x2E, 0x32, 0x2E, 0x34, 0x23, 0x30, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00,
+    ];
+
+    let file_path_string = &args[2];
+    let path = Path::new(file_path_string);
+    let filename = path.file_name();
+    let fn_no_ext = path.file_stem();
+    let fn_string;
+    let fs_string;
+    match filename {
+        Some(fname) => match fname.to_str() {
+            Some(str) => fn_string = str,
+            None => fn_string = "[filename error]",
+        },
+        None => fn_string = "[filename error]",
+    }
+
+    match fn_no_ext {
+        Some(fname) => match fname.to_str() {
+            Some(str) => fs_string = str,
+            None => fs_string = "[filename error]",
+        },
+        None => fs_string = "[filename error]",
+    }
+
+    let mut tex0_file;
+    let tex0_result = File::open(path);
+    match tex0_result {
+        Ok(f) => tex0_file = f,
+        Err(error) => {
+            let error_string = error.to_string();
+            println!("GCT Error: {}\n", error_string);
+            usage();
+            process::exit(exitcode::NOINPUT);
+        }
+    }
+
+    let seek_result = tex0_file.seek(SeekFrom::Start(0x1C));
+    match seek_result {
+        Ok(_) => {}
+        Err(error) => {
+            let error_string = error.to_string();
+            println!("Seek Error: {}\n", error_string);
+            usage();
+            process::exit(exitcode::IOERR);
+        }
+    }
+
+    let mut width_bytes = [0; 2];
+    let width_result = tex0_file.read_exact(&mut width_bytes);
+    match width_result {
+        Ok(_) => {}
+        Err(error) => {
+            let error_string = error.to_string();
+            println!("Unable to read width: {}\n", error_string);
+            usage();
+            process::exit(exitcode::IOERR);
+        }
+    }
+
+    let mut height_bytes = [0; 2];
+    let height_result = tex0_file.read_exact(&mut height_bytes);
+    match height_result {
+        Ok(_) => {}
+        Err(error) => {
+            let error_string = error.to_string();
+            println!("Unable to read height: {}\n", error_string);
+            usage();
+            process::exit(exitcode::IOERR);
+        }
+    }
+
+    let seek_result = tex0_file.seek(SeekFrom::Start(0x23));
+    match seek_result {
+        Ok(_) => {}
+        Err(error) => {
+            let error_string = error.to_string();
+            println!("Seek Error: {}\n", error_string);
+            usage();
+            process::exit(exitcode::IOERR);
+        }
+    }
+
+    let mut enc_byte = [0; 1];
+    let enc_result = tex0_file.read_exact(&mut enc_byte);
+    match enc_result {
+        Ok(_) => {}
+        Err(error) => {
+            let error_string = error.to_string();
+            println!("Unable to read encoding type: {}\n", error_string);
+            usage();
+            process::exit(exitcode::IOERR);
+        }
+    }
+
+    let seek_result = tex0_file.seek(SeekFrom::Start(0x40));
+    match seek_result {
+        Ok(_) => {}
+        Err(error) => {
+            let error_string = error.to_string();
+            println!("Seek Error: {}\n", error_string);
+            usage();
+            process::exit(exitcode::IOERR);
+        }
+    }
+
+    let mut rest_of_file = Vec::new();
+    let read_result = tex0_file.read_to_end(&mut rest_of_file);
+    match read_result {
+        Ok(_) => {}
+        Err(error) => {
+            let error_string = error.to_string();
+            println!("Unable to read rest of file: {}\n", error_string);
+            usage();
+            process::exit(exitcode::IOERR);
+        }
+    }
+
+    let name_len = 4 + fs_string.len();
+    let end_pad_len = if name_len % 4 == 0 { 4 } else { name_len % 4 };
+    let footer_len = name_len + end_pad_len;
+    rest_of_file.truncate(rest_of_file.len() - footer_len);
+
+    let data_len;
+    let data_len_result = u32::try_from(rest_of_file.len());
+    match data_len_result {
+        Ok(i) => data_len = i,
+        Err(error) => {
+            let error_string = error.to_string();
+            println!("Data Block Too Big: {}\n", error_string);
+            usage();
+            process::exit(exitcode::NOINPUT);
+        }
+    }
+
+    const GCT_HEADER_START: [u8; 12] = [
+        0x47, 0x43, 0x4E, 0x54, 0x00, 0x00, 0x00, 0x03, 0x00, 0x40, 0x00, 0x00,
+    ];
+
+    let mut header = GCT_HEADER_START.to_vec();
+    header.extend(data_len.to_be_bytes().to_vec());
+    header.extend(width_bytes.to_vec());
+    header.extend(height_bytes.to_vec());
+    header.extend(enc_byte.to_vec());
+    header.extend(if encoding_has_palette(enc_byte) {
+        vec![0x02]
+    } else {
+        vec![0x01]
+    });
+    header.extend(vec![0; 10]);
+    header.extend(TREY_PAD.to_vec());
+
+    let mut gct_file = header;
+    gct_file.extend(rest_of_file);
+
+    let gct_path = format!("output/{}.gct", fs_string);
+    let write_result = fs::write(gct_path, gct_file);
+    match write_result {
+        Ok(_) => {}
+        Err(error) => {
+            let error_string = error.to_string();
+            println!("Unable to write TEX0 file: {}\n", error_string);
+            usage();
+            process::exit(exitcode::IOERR);
+        }
+    }
+}
+
+fn encoding_has_palette(enc_byte: [u8; 1]) -> bool {
+    matches![enc_byte, [0x08] | [0x09]]
+}
 
 fn read_short(mut file: &File) -> Result<u16, Error> {
     let mut buffer = [0; 2]; // 2 byte buffer
