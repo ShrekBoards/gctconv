@@ -484,6 +484,72 @@ fn to_gct(args: Vec<String>) {
     let mut gct_file = header;
     gct_file.extend(rest_of_file);
 
+    match (args.len() < 4, encoding_has_palette(enc_byte)) {
+        (true, true) => println!("this encoding should have a palette file as an argument!!"),
+        (false, true) => {
+            let file_path_string = &args[3];
+            let path = Path::new(file_path_string);
+            let filename = path.file_name();
+            let fn_no_ext = path.file_stem();
+            let fn_string;
+            let fs_string;
+            match filename {
+                Some(fname) => match fname.to_str() {
+                    Some(str) => fn_string = str,
+                    None => fn_string = "[filename error]",
+                },
+                None => fn_string = "[filename error]",
+            }
+
+            match fn_no_ext {
+                Some(fname) => match fname.to_str() {
+                    Some(str) => fs_string = str,
+                    None => fs_string = "[filename error]",
+                },
+                None => fs_string = "[filename error]",
+            }
+
+            let mut plt0_file;
+            let plt0_result = File::open(path);
+            match plt0_result {
+                Ok(f) => plt0_file = f,
+                Err(error) => {
+                    let error_string = error.to_string();
+                    println!("GCT Error: {}\n", error_string);
+                    usage();
+                    process::exit(exitcode::NOINPUT);
+                }
+            }
+
+            let seek_result = plt0_file.seek(SeekFrom::Start(0x40));
+            match seek_result {
+                Ok(_) => {}
+                Err(error) => {
+                    let error_string = error.to_string();
+                    println!("Seek Error: {}\n", error_string);
+                    usage();
+                    process::exit(exitcode::IOERR);
+                }
+            }
+
+            let mut rest_of_file = Vec::new();
+            let read_result = plt0_file.read_to_end(&mut rest_of_file);
+            match read_result {
+                Ok(_) => {}
+                Err(error) => {
+                    let error_string = error.to_string();
+                    println!("Unable to read rest of file: {}\n", error_string);
+                    usage();
+                    process::exit(exitcode::IOERR);
+                }
+            }
+
+            rest_of_file.truncate(rest_of_file.len() - footer_len);
+            gct_file.extend(rest_of_file);
+        }
+        (_, false) => {}
+    }
+
     let gct_path = format!("output/{}.gct", fs_string);
     let write_result = fs::write(gct_path, gct_file);
     match write_result {
