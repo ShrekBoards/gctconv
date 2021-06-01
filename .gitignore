@@ -4,3 +4,5 @@
 *.tex0
 *.png
 wimgt
+*.plt0
+output/

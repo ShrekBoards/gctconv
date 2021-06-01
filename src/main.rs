@@ -1,5 +1,5 @@
 use std::{
-    convert::TryFrom,
+    convert::{TryFrom, TryInto},
     io::{Seek, SeekFrom},
 };
 use std::{
@@ -41,13 +41,23 @@ fn to_tex0(args: Vec<String>) {
     let file_path_string = &args[2];
     let path = Path::new(file_path_string);
     let filename = path.file_name();
+    let fn_no_ext = path.file_stem();
     let fn_string;
+    let fs_string;
     match filename {
         Some(fname) => match fname.to_str() {
             Some(str) => fn_string = str,
             None => fn_string = "[filename error]",
         },
         None => fn_string = "[filename error]",
+    }
+
+    match fn_no_ext {
+        Some(fname) => match fname.to_str() {
+            Some(str) => fs_string = str,
+            None => fs_string = "[filename error]",
+        },
+        None => fs_string = "[filename error]",
     }
 
     let md;
@@ -63,7 +73,7 @@ fn to_tex0(args: Vec<String>) {
     }
     let filesize = md.len();
 
-    let fs_int;
+    let mut fs_int;
     let fs_int_result = u32::try_from(filesize);
     match fs_int_result {
         Ok(i) => fs_int = i,
@@ -169,6 +179,10 @@ fn to_tex0(args: Vec<String>) {
     // header == ["T", "E", "X", "0"]
 
     // then the filesize, big endian
+    if enc_byte[0] == 0x08 {
+        // if CI4, take 0x20 off the total
+        fs_int -= 0x20;
+    }
     let fs_bytes = fs_int.to_be_bytes().to_vec();
     header.extend(fs_bytes);
     // header == [...[0x04], FS_1, FS_2, FS_3, FS_4]
@@ -194,9 +208,14 @@ fn to_tex0(args: Vec<String>) {
     header.extend(fs_p4_bytes);
     // header == [...[0x14], FS_P4_1, FS_P4_2, FS_P4_3, FS_P4_4]
 
-    // then int 0 again
-    header.extend(&four_byte_0);
-    // header == [...[0x18], 0_byte, 0_byte, 0_byte, 0_byte]
+    if enc_byte[0] == 0x08 {
+        // int 1 if 0x08 (CI4)
+        header.extend(&four_byte_1);
+    } else {
+        // otherwise int 0
+        header.extend(&four_byte_0);
+    }
+    // header == [...[0x18], 0/1_byte, 0/1_byte, 0/1_byte, 0/1_byte]
 
     // width as short, height as short, enc as byte
     header.extend(width_bytes.to_vec());
@@ -205,7 +224,7 @@ fn to_tex0(args: Vec<String>) {
     // header == [...[0x1C], height_1, height_2]
 
     // padding for enc byte
-    header.extend([0, 0, 0].to_vec());
+    header.extend([0; 3].to_vec());
     // header == [...[0x20], 0_byte, 0_byte, 0_byte]
 
     // encoding byte
@@ -220,8 +239,40 @@ fn to_tex0(args: Vec<String>) {
     header.extend(padding);
     // header is now padded to 0x40
 
+    if enc_byte[0] == 0x08 {
+        // if CI4, extract palette data
+        let palette_data = rest_of_file.split_off(rest_of_file.len() - 0x20);
+    }
+
     let mut tex0_file = header;
     tex0_file.extend(rest_of_file);
+
+    let mut tex0_footer = vec![0_u8; 3]; // three 0 bytes
+    if !fs_string.is_ascii() {
+        println!("\"{}\" isn't ascii\n", fs_string);
+        usage();
+        process::exit(exitcode::DATAERR);
+    }
+
+    let stem_bytes = fs_string.as_bytes().to_owned();
+    let stem_length = stem_bytes.len();
+    let sl_byte;
+    let sl_byte_result = u8::try_from(stem_length);
+    match sl_byte_result {
+        Ok(i) => sl_byte = i,
+        Err(error) => {
+            let error_string = error.to_string();
+            println!("GCT Filename Too Big: {}\n", error_string);
+            usage();
+            process::exit(exitcode::NOINPUT);
+        }
+    }
+
+    tex0_footer.extend(vec![sl_byte]); // vec.extend_one is unstable, so have to vec![]
+    tex0_footer.extend(stem_bytes);
+    tex0_footer.extend([0; 3].to_vec());
+
+    tex0_file.extend(tex0_footer);
 
     let write_result = fs::write("test.tex0", tex0_file);
     match write_result {
