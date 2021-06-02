@@ -8,3 +8,5 @@ edition = "2018"
 
 [dependencies]
 exitcode = "1.1.2"
+num-traits = "0.2.14"
+num-derive = "0.3.3"

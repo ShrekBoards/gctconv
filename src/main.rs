@@ -10,6 +10,27 @@ use std::{
     process,
 };
 
+use num_traits::{FromPrimitive, ToPrimitive};
+
+#[macro_use]
+extern crate num_derive;
+
+#[repr(u8)]
+#[derive(FromPrimitive, ToPrimitive)]
+enum EncodingType {
+    I4 = 0x00,
+    I8 = 0x01,
+    Ia4 = 0x02,
+    Ia8 = 0x03,
+    Rgb565 = 0x04,
+    Rgb5A3 = 0x05,
+    Rgba32 = 0x06,
+    Ci4 = 0x08,
+    Ci8 = 0x09,
+    Ci14x2 = 0x0A,
+    Cmpr = 0x0E,
+}
+
 fn main() {
     let args: Vec<_> = env::args().collect();
 
@@ -179,10 +200,7 @@ fn to_tex0(args: Vec<String>) {
     // header == ["T", "E", "X", "0"]
 
     // then the filesize, big endian
-    if enc_byte[0] == 0x08 {
-        // if CI4, take 0x20 off the total
-        fs_int -= 0x20;
-    }
+    fs_int -= encoding_palette_size_from_byte(enc_byte);
     let fs_bytes = fs_int.to_be_bytes().to_vec();
     header.extend(fs_bytes);
     // header == [...[0x04], FS_1, FS_2, FS_3, FS_4]
@@ -208,12 +226,11 @@ fn to_tex0(args: Vec<String>) {
     header.extend(fs_p4_bytes);
     // header == [...[0x14], FS_P4_1, FS_P4_2, FS_P4_3, FS_P4_4]
 
-    if enc_byte[0] == 0x08 {
-        // int 1 if 0x08 (CI4)
-        header.extend(&four_byte_1);
-    } else {
+    match FromPrimitive::from_u8(enc_byte[0]) {
+        // int 1 if CI4 or CI8
+        Some(EncodingType::Ci4) | Some(EncodingType::Ci8) => header.extend(&four_byte_1),
         // otherwise int 0
-        header.extend(&four_byte_0);
+        None | Some(_) => header.extend(&four_byte_0),
     }
     // header == [...[0x18], 0/1_byte, 0/1_byte, 0/1_byte, 0/1_byte]
 
@@ -239,23 +256,41 @@ fn to_tex0(args: Vec<String>) {
     header.extend(padding);
     // header is now padded to 0x40
 
-    let mut plt0_file = if enc_byte[0] == 0x08 {
-        // if CI4, extract palette data
-        let palette_data = rest_of_file.split_off(rest_of_file.len() - 0x20);
+    let mut plt0_file = match FromPrimitive::from_u8(enc_byte[0]) {
+        Some(EncodingType::Ci4) => {
+            // if CI4, extract palette data
+            let palette_data = rest_of_file
+                .split_off(rest_of_file.len() - encoding_palette_size_usize(EncodingType::Ci4));
 
-        const PLT0_HEADER: [u8; 0x40] = [
-            0x50, 0x4C, 0x54, 0x30, 0x00, 0x00, 0x00, 0x60, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00, 0x00, 0x40, 0x00, 0x00, 0x00, 0x64, 0x00, 0x00, 0x00, 0x02,
-            0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        ];
+            const PLT0_HEADER: [u8; 0x40] = [
+                0x50, 0x4C, 0x54, 0x30, 0x00, 0x00, 0x00, 0x60, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x40, 0x00, 0x00, 0x00, 0x64, 0x00, 0x00, 0x00, 0x02,
+                0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            ];
 
-        let mut plt0_file = PLT0_HEADER.to_vec();
-        plt0_file.extend(palette_data);
-        plt0_file
-    } else {
-        Vec::new()
+            let mut plt0_file = PLT0_HEADER.to_vec();
+            plt0_file.extend(palette_data);
+            plt0_file
+        }
+        Some(EncodingType::Ci8) => {
+            let palette_data = rest_of_file
+                .split_off(rest_of_file.len() - encoding_palette_size_usize(EncodingType::Ci8));
+
+            const PLT0_HEADER: [u8; 0x40] = [
+                0x50, 0x4C, 0x54, 0x30, 0x00, 0x00, 0x02, 0x40, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x40, 0x00, 0x00, 0x02, 0x44, 0x00, 0x00, 0x00, 0x02,
+                0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            ];
+
+            let mut plt0_file = PLT0_HEADER.to_vec();
+            plt0_file.extend(palette_data);
+            plt0_file
+        }
+        None | Some(_) => Vec::new(),
     };
 
     let mut tex0_file = header;
@@ -556,7 +591,7 @@ fn to_gct(args: Vec<String>) {
         Ok(_) => {}
         Err(error) => {
             let error_string = error.to_string();
-            println!("Unable to write TEX0 file: {}\n", error_string);
+            println!("Unable to write GCT file: {}\n", error_string);
             usage();
             process::exit(exitcode::IOERR);
         }
@@ -564,7 +599,33 @@ fn to_gct(args: Vec<String>) {
 }
 
 fn encoding_has_palette(enc_byte: [u8; 1]) -> bool {
-    matches![enc_byte, [0x08] | [0x09]]
+    matches!(
+        FromPrimitive::from_u8(enc_byte[0]),
+        Some(EncodingType::Ci4) | Some(EncodingType::Ci8)
+    )
+}
+
+fn encoding_palette_size_from_byte(enc_byte: [u8; 1]) -> u32 {
+    match FromPrimitive::from_u8(enc_byte[0]) {
+        Some(e) => encoding_palette_size_u32(e),
+        None => 0,
+    }
+}
+
+fn encoding_palette_size_u32(enc: EncodingType) -> u32 {
+    match enc {
+        EncodingType::Ci4 => 0x20,
+        EncodingType::Ci8 => 0x200,
+        _ => 0,
+    }
+}
+
+fn encoding_palette_size_usize(enc: EncodingType) -> usize {
+    match enc {
+        EncodingType::Ci4 => 0x20,
+        EncodingType::Ci8 => 0x200,
+        _ => 0,
+    }
 }
 
 fn read_short(mut file: &File) -> Result<u16, Error> {
