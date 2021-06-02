@@ -55,7 +55,7 @@ fn main() {
 fn usage() {
     println!("Usage:");
     println!("gctconv -tex0 file.gct");
-    println!("gctconv -gct file.tex0");
+    println!("gctconv -gct file.tex0 [file.plt0]");
 }
 
 fn to_tex0(args: Vec<String>) {
