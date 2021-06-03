@@ -570,6 +570,31 @@ fn to_gct(args: Vec<String>) {
                 }
             }
 
+            let seek_result = plt0_file.seek(SeekFrom::Start(0x1B));
+            match seek_result {
+                Ok(_) => {}
+                Err(error) => {
+                    let error_string = error.to_string();
+                    println!("Seek Error: {}\n", error_string);
+                    usage();
+                    process::exit(exitcode::IOERR);
+                }
+            }
+
+            let mut rgb_byte = [0; 1];
+            let rgb_result = plt0_file.read_exact(&mut rgb_byte);
+            match rgb_result {
+                Ok(_) => {}
+                Err(error) => {
+                    let error_string = error.to_string();
+                    println!("Unable to read width: {}\n", error_string);
+                    usage();
+                    process::exit(exitcode::IOERR);
+                }
+            }
+
+            gct_file[0x15] = rgb_byte[0];
+
             let seek_result = plt0_file.seek(SeekFrom::Start(0x40));
             match seek_result {
                 Ok(_) => {}
