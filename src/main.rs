@@ -165,6 +165,18 @@ fn to_tex0(args: Vec<String>) {
         }
     }
 
+    let mut rgb_byte = [0; 1];
+    let enc_result = gct_file.read_exact(&mut rgb_byte);
+    match enc_result {
+        Ok(_) => {}
+        Err(error) => {
+            let error_string = error.to_string();
+            println!("Unable to read rgb type: {}\n", error_string);
+            usage();
+            process::exit(exitcode::IOERR);
+        }
+    }
+
     let seek_result = gct_file.seek(SeekFrom::Start(0x40));
     match seek_result {
         Ok(_) => {}
@@ -271,6 +283,7 @@ fn to_tex0(args: Vec<String>) {
             ];
 
             let mut plt0_file = PLT0_HEADER.to_vec();
+            plt0_file[0x1B] = rgb_byte[0];
             plt0_file.extend(palette_data);
             plt0_file
         }
@@ -287,6 +300,7 @@ fn to_tex0(args: Vec<String>) {
             ];
 
             let mut plt0_file = PLT0_HEADER.to_vec();
+            plt0_file[0x1B] = rgb_byte[0];
             plt0_file.extend(palette_data);
             plt0_file
         }
